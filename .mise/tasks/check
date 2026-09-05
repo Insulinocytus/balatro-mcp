@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+if grep -n get_game_rules README.md src/*.lua tests/*.lua; then
+    echo "get_game_rules must be removed from discovery, adapters, fixtures, tests, and README" >&2
+    exit 1
+fi
+
+stylua --check main.lua config.lua src tests/conf.lua tests/main.lua tests/fake_balatro_adapter.lua tests/game_mcp_server_test.lua tests/mod_entry_test.lua tests/vanilla_consumable_prototypes.lua tests/vanilla_voucher_back_prototypes.lua tests/vanilla_tag_prototypes.lua tests/vanilla_lifecycle_joker_prototypes.lua tests/vanilla_blind_prototypes.lua
+lua-language-server --check . --checklevel=Warning
+lovec tests
+
+port="$(node -e 'const s=require("net").createServer();s.listen(0,"127.0.0.1",()=>{console.log(s.address().port);s.close()})')"
+log_file="$(mktemp)"
+server_pid=""
+cleanup() {
+    if [[ -n "$server_pid" ]]; then
+        kill "$server_pid" 2>/dev/null || true
+        wait "$server_pid" 2>/dev/null || true
+    fi
+    rm -f "$log_file"
+}
+trap cleanup EXIT
+
+BALATRO_MCP_TEST_SERVER_PORT="$port" lovec tests >"$log_file" 2>&1 &
+server_pid=$!
+body='{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}'
+ready=false
+for _ in {1..100}; do
+    if curl --silent --fail --output /dev/null \
+        --header 'Accept: application/json, text/event-stream' \
+        --header 'Content-Type: application/json' \
+        --header 'MCP-Protocol-Version: 2026-07-28' \
+        --header 'Mcp-Method: server/discover' \
+        --data "$body" \
+        "http://127.0.0.1:$port/mcp"; then
+        ready=true
+        break
+    fi
+    if ! kill -0 "$server_pid" 2>/dev/null; then
+        cat "$log_file"
+        exit 1
+    fi
+    sleep 0.05
+done
+if [[ "$ready" != true ]]; then
+    cat "$log_file"
+    echo "Test server did not become ready" >&2
+    exit 1
+fi
+
+rm -rf results/conformance
+conformance server \
+    --url "http://127.0.0.1:$port/mcp" \
+    --requirements 2026-07-28 \
+    --expected-failures tests/conformance-requirements-baseline.yml \
+    --output-dir results/conformance

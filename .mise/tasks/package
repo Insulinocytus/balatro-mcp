@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+skill_source="skills/balatro-game-rules/SKILL.md"
+
+version="$(node -p "require('./balatro-mcp.json').version")"
+if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+    echo "Invalid version in balatro-mcp.json: $version" >&2
+    exit 1
+fi
+skill_version="$(node -e 'const match = require("fs").readFileSync(process.argv[1], "utf8").match(/^version:\s*"?([^"\r\n]+)"?/m); process.stdout.write(match?.[1] ?? "")' "$skill_source")"
+if [[ "$skill_version" != "$version" ]]; then
+    echo "Skill version $skill_version must match balatro-mcp.json version $version" >&2
+    exit 1
+fi
+
+for path in balatro-mcp.json main.lua config.lua README.md LICENSE src "$skill_source"; do
+    if [[ ! -e "$path" ]]; then
+        echo "Missing required package path: $path" >&2
+        exit 1
+    fi
+done
+
+mkdir -p dist
+out="$PWD/dist/balatro-mcp-${version}.zip"
+rm -f "$out"
+
+index="$(mktemp)"
+cleanup() {
+    rm -f "$index"
+}
+trap cleanup EXIT
+export GIT_INDEX_FILE="$index"
+git read-tree --empty
+git add --force balatro-mcp.json main.lua config.lua README.md LICENSE src
+mod_tree="$(git write-tree)"
+
+git read-tree --empty
+git read-tree --prefix=balatro-mcp/ "$mod_tree"
+skill_blob="$(git hash-object -w "$skill_source")"
+git update-index --add --cacheinfo "100644,$skill_blob,balatro-game-rules/SKILL.md"
+tree="$(git write-tree)"
+
+git archive --format=zip -o "$out" "$tree"
+
+required=(
+    balatro-mcp/balatro-mcp.json
+    balatro-mcp/main.lua
+    balatro-mcp/config.lua
+    balatro-mcp/README.md
+    balatro-mcp/LICENSE
+    balatro-mcp/src/game_mcp_server.lua
+    balatro-mcp/src/http_worker.lua
+    balatro-mcp/src/balatro_adapter.lua
+    balatro-mcp/src/tool_catalog.lua
+    balatro-game-rules/SKILL.md
+)
+listing="$(git archive --format=tar "$tree" | tar -t | tr -d '\r')"
+count=0
+tops=""
+while IFS= read -r name; do
+    [[ -z "$name" || "$name" == */ ]] && continue
+    count=$((count + 1))
+    top="${name%%/*}"
+    case "$tops" in
+        *"|$top|"*) ;;
+        *) tops="$tops|$top|" ;;
+    esac
+    case "$name" in
+        balatro-mcp/balatro-mcp.json | balatro-mcp/main.lua | balatro-mcp/config.lua | balatro-mcp/README.md | balatro-mcp/LICENSE) ;;
+        balatro-mcp/src/*.lua)
+            [[ "$name" == balatro-mcp/src/*/*.lua ]] && {
+                echo "unexpected zip entry: $name" >&2
+                exit 1
+            }
+            ;;
+        balatro-game-rules/SKILL.md) ;;
+        *)
+            echo "unexpected zip entry: $name" >&2
+            exit 1
+            ;;
+    esac
+done <<<"$listing"
+if [[ "$tops" != "|balatro-game-rules||balatro-mcp|" && "$tops" != "|balatro-mcp||balatro-game-rules|" ]]; then
+    echo "zip root must contain only balatro-mcp/ and balatro-game-rules/, got: $tops" >&2
+    exit 1
+fi
+for required_path in "${required[@]}"; do
+    if ! grep -Fxq "$required_path" <<<"$listing"; then
+        echo "missing zip entry: $required_path" >&2
+        exit 1
+    fi
+done
+
+zip_skill="$(git archive --format=tar "$tree" balatro-game-rules/SKILL.md | tar -xO balatro-game-rules/SKILL.md | tr -d '\r')"
+source_skill="$(tr -d '\r' <"$skill_source")"
+if [[ "$zip_skill" != "$source_skill" ]]; then
+    echo "zip skill content must match $skill_source" >&2
+    exit 1
+fi
+
+echo "zip ok: $count files"
+echo "Packaged $out"

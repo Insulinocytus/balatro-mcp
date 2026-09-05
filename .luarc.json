@@ -1,0 +1,21 @@
+{
+  "$schema": "https://raw.githubusercontent.com/LuaLS/vscode-lua/master/setting/schema.json",
+  "runtime.version": "LuaJIT",
+  "workspace.library": [
+    "${3rd}/love2d/library"
+  ],
+  "workspace.ignoreDir": [
+    ".git",
+    "tests/vendor"
+  ],
+  "diagnostics.globals": [
+    "G",
+    "Game",
+    "JSON",
+    "SMODS",
+    "sendDebugMessage",
+    "sendErrorMessage",
+    "sendInfoMessage",
+    "sendWarnMessage"
+  ]
+}

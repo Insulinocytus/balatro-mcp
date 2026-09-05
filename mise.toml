@@ -1,0 +1,6 @@
+[tools]
+node = "24.19.0"
+stylua = "2.5.2"
+lua-language-server = "3.19.1"
+"npm:@modelcontextprotocol/conformance" = "0.2.0-alpha.11"
+"github:love2d/love" = { version = "11.5", matching = "win64.zip", extract_all = true }

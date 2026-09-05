@@ -1,0 +1,13 @@
+dist/
+results/
+.mise.local.toml
+
+.env
+.env.*
+!.env.example
+*.log
+*.tmp
+*.bak
+
+.DS_Store
+Thumbs.db
