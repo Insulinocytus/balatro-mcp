@@ -10,7 +10,6 @@ A Balatro mod that exposes game state and semantic actions to local AI clients t
 4. Start Balatro and connect your MCP client using **Streamable HTTP** to `http://127.0.0.1:18790/mcp`.
 
 Supported MCP versions: `2026-07-28`, `2025-11-25`, `2025-06-18`, and `2025-03-26`.
-
 ## Features
 
 - Read filtered Balatro game state.
