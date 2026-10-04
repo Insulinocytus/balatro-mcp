@@ -1,3 +1,9 @@
+---
+status: superseded by ADR-0013
+---
+
 # 仅支持 MCP 2026-07-28
 
 游戏内 MCP 服务器只实现无状态的 MCP `2026-07-28` 生命周期，因为当前协议和预期使用的 pi 客户端都已支持该版本，而同时维护旧版初始化生命周期只会重复协议行为，无法改善游戏内模型。Lua 实现使用小型手写 codec，并通过官方 schema 和 conformance requirements 验证；pi 客户端必须选择 `auto` 或 `2026-07-28`，不能使用默认旧版模式。
+
+该限制已由 [ADR 0013](0013-support-legacy-streamable-http.md) 取代；本文件保留原决策背景。

@@ -100,6 +100,7 @@ local socket = require("socket")
 ---@field previous_threaderror? fun(thread: love.Thread, error_message: string)
 ---@field threaderror_handler? fun(thread: love.Thread, error_message: string)
 ---@field pending_action? table
+---@field pending_batch? table
 ---@field log? fun(level: "error"|"info"|"debug", message: string)
 ---@field log_enabled? fun(level: "error"|"info"|"debug"): boolean
 ---@field trace_serial integer
@@ -114,6 +115,11 @@ GameMcpServer.__index = GameMcpServer
 
 local instance_count = 0
 local protocol_version = "2026-07-28"
+local supported_versions = { protocol_version, "2025-11-25", "2025-06-18", "2025-03-26" }
+local supported_protocols = {}
+for _, version in ipairs(supported_versions) do
+    supported_protocols[version] = true
+end
 local empty_object_key = "__balatro_mcp_empty_object_7b1021"
 local null_value_key = "__balatro_mcp_null_7b1021"
 
@@ -123,6 +129,77 @@ end
 
 local function json_null()
     return { [null_value_key] = true }
+end
+
+local input_null = json_null()
+
+local function restore_input_nulls(value, marker)
+    if type(value) ~= "table" then
+        return value
+    end
+    if value[marker] == true then
+        return input_null
+    end
+    for key, child in pairs(value) do
+        value[key] = restore_input_nulls(child, marker)
+    end
+    return value
+end
+
+local function decode_request(json, body)
+    if not body:find("null", 1, true) then
+        return json.decode(body)
+    end
+    -- Steamodded drops null values; replace only unquoted literals before decoding.
+    local parts, occupied_strings = {}, {}
+    local cursor, start = 1, 1
+    while cursor <= #body do
+        if body:byte(cursor) == 34 then
+            local quote_start = cursor
+            local escaped = false
+            cursor = cursor + 1
+            while cursor <= #body do
+                local byte = body:byte(cursor)
+                if byte == 92 then
+                    escaped = true
+                    cursor = cursor + 2
+                elseif byte == 34 then
+                    break
+                else
+                    cursor = cursor + 1
+                end
+            end
+            if cursor <= #body then
+                local value = escaped and json.decode(body:sub(quote_start, cursor))
+                    or body:sub(quote_start + 1, cursor - 1)
+                occupied_strings[value] = true
+            end
+            cursor = cursor + 1
+        elseif body:sub(cursor, cursor + 3) == "null" then
+            parts[#parts + 1] = body:sub(start, cursor - 1)
+            parts[#parts + 1] = false
+            cursor = cursor + 4
+            start = cursor
+        else
+            cursor = cursor + 1
+        end
+    end
+    if #parts == 0 then
+        return json.decode(body)
+    end
+    local marker, suffix = null_value_key, 0
+    while occupied_strings[marker] do
+        suffix = suffix + 1
+        marker = null_value_key .. tostring(suffix)
+    end
+    local replacement = '{"' .. marker .. '":true}'
+    for index, part in ipairs(parts) do
+        if part == false then
+            parts[index] = replacement
+        end
+    end
+    parts[#parts + 1] = body:sub(start)
+    return restore_input_nulls(json.decode(table.concat(parts)), marker)
 end
 
 local function table_is_array(value)
@@ -136,6 +213,10 @@ local function table_is_array(value)
         maximum = math.max(maximum, key)
     end
     return count > 0 and count == maximum
+end
+
+local function json_object(value)
+    return type(value) == "table" and value ~= input_null and not table_is_array(value)
 end
 
 local function sorted_keys(value)
@@ -441,6 +522,29 @@ end
 ---@param value table
 ---@return McpHttpResponse
 function GameMcpServer:_json_response(status, value)
+    local version = self.active_trace and self.active_trace.protocol_version
+    local result = value.result
+    if version and version ~= protocol_version and type(result) == "table" then
+        result.resultType = nil
+        result.ttlMs = nil
+        result.cacheScope = nil
+        if version == "2025-03-26" then
+            result.structuredContent = nil
+            if result.tools then
+                local tools = {}
+                for index, tool in ipairs(result.tools) do
+                    tools[index] = {
+                        name = tool.name,
+                        description = tool.description
+                            :gsub("Success structuredContent:", "Success JSON text content:")
+                            :gsub(" as announced in outputSchema", ""),
+                        inputSchema = tool.inputSchema,
+                    }
+                end
+                result.tools = tools
+            end
+        end
+    end
     return {
         status = status,
         headers = { ["Content-Type"] = "application/json" },
@@ -1840,6 +1944,47 @@ function GameMcpServer:_execute_action(id, name, arguments, deadline)
     )
 end
 
+function GameMcpServer:_respond(response)
+    local batch = self.pending_batch
+    if batch then
+        if not batch.notification and response.body ~= "" then
+            batch.bodies[#batch.bodies + 1] = response.body
+        end
+    else
+        self.channels.responses:push(response)
+    end
+end
+
+function GameMcpServer:_dispatch_next_batch()
+    local batch = assert(self.pending_batch)
+    while batch.index <= #batch.messages do
+        local message = batch.messages[batch.index]
+        batch.index = batch.index + 1
+        batch.notification = type(message) == "table"
+            and message.jsonrpc == "2.0"
+            and type(message.method) == "string"
+            and message.id == nil
+        self.active_trace = self:_new_request_trace(batch.request)
+        local response = self:_dispatch_message(batch.request, message)
+        if not response then
+            self.pending_action.http_id = batch.request.id
+            self.pending_action.trace = self.active_trace
+            return nil
+        end
+        if not self.active_trace.finished then
+            self:_finish_http_response_trace(response)
+        end
+        self:_respond(response)
+        self.active_trace = nil
+    end
+    self.pending_batch = nil
+    return {
+        status = #batch.bodies > 0 and 200 or 202,
+        headers = { ["Content-Type"] = "application/json" },
+        body = #batch.bodies > 0 and "[" .. table.concat(batch.bodies, ",") .. "]" or "",
+    }
+end
+
 function GameMcpServer:_poll_pending_action()
     local pending = self.pending_action
     if not pending or not pending.http_id then
@@ -1866,7 +2011,7 @@ function GameMcpServer:_poll_pending_action()
             message = message,
         })
         response.id = pending.http_id
-        self.channels.responses:push(response)
+        self:_respond(response)
         self.pending_action = nil
         return
     end
@@ -1891,7 +2036,7 @@ function GameMcpServer:_poll_pending_action()
                 message = observation_error.message,
             })
             response.id = pending.http_id
-            self.channels.responses:push(response)
+            self:_respond(response)
             self.pending_action = nil
             return
         end
@@ -1905,7 +2050,7 @@ function GameMcpServer:_poll_pending_action()
         local response = self:_execute_action(rpc_id, name, arguments, deadline)
         if response then
             response.id = http_id
-            self.channels.responses:push(response)
+            self:_respond(response)
         else
             assert(self.pending_action, "retried action deferred without pending state")
             self.pending_action.http_id = http_id
@@ -1920,7 +2065,7 @@ function GameMcpServer:_poll_pending_action()
         if pending.kind == "encyclopedia" then
             local response = self:_encyclopedia_result(pending.rpc_id)
             response.id = pending.http_id
-            self.channels.responses:push(response)
+            self:_respond(response)
             self.pending_action = nil
             return
         end
@@ -1967,7 +2112,7 @@ function GameMcpServer:_poll_pending_action()
             response = self:_tool_result(pending.rpc_id, { state = snapshot }, false)
         end
         response.id = pending.http_id
-        self.channels.responses:push(response)
+        self:_respond(response)
         self.pending_action = nil
         return
     end
@@ -1989,20 +2134,45 @@ function GameMcpServer:_poll_pending_action()
         message = observation_error.message,
     })
     response.id = pending.http_id
-    self.channels.responses:push(response)
+    self:_respond(response)
     self.pending_action = nil
 end
 
 ---@param request McpHttpRequest
 ---@return McpHttpResponse?
 function GameMcpServer:_dispatch(request)
-    local ok, message = pcall(self.json.decode, request.body)
-    if not ok or type(message) ~= "table" then
+    local ok, message = pcall(decode_request, self.json, request.body)
+    if not ok then
         self:_begin_request_trace({
             method = request.headers["mcp-method"] or "unknown",
             params = {},
         })
         return self:_json_response(400, error_result(nil, -32700, "Parse error"))
+    end
+    if type(message) == "table" and table_is_array(message) then
+        if (request.headers["mcp-protocol-version"] or "2025-03-26") ~= "2025-03-26" then
+            return self:_json_response(400, error_result(nil, -32600, "Invalid Request"))
+        end
+        for _, entry in ipairs(message) do
+            if type(entry) == "table" and entry.method == "initialize" then
+                return self:_json_response(
+                    400,
+                    error_result(nil, -32600, "Initialization must not be batched")
+                )
+            end
+        end
+        self.pending_batch = { request = request, messages = message, index = 1, bodies = {} }
+        return self:_dispatch_next_batch()
+    end
+    return self:_dispatch_message(request, message)
+end
+
+---@param request McpHttpRequest
+---@param message any
+---@return McpHttpResponse?
+function GameMcpServer:_dispatch_message(request, message)
+    if not json_object(message) then
+        return self:_json_response(400, error_result(nil, -32600, "Invalid Request"))
     end
 
     local id_type = type(message.id)
@@ -2031,37 +2201,94 @@ function GameMcpServer:_dispatch(request)
     local client_capabilities = type(meta) == "table"
             and meta["io.modelcontextprotocol/clientCapabilities"]
         or nil
-    if
-        type(params) ~= "table"
-        or type(meta) ~= "table"
-        or type(requested_version) ~= "string"
-        or type(client_capabilities) ~= "table"
-    then
-        return self:_json_response(400, error_result(message.id, -32602, "Invalid params"))
-    end
-
     local headers = request.headers
-    if
-        headers["mcp-protocol-version"] == nil
-        or headers["mcp-method"] == nil
-        or headers["mcp-protocol-version"] ~= requested_version
-        or headers["mcp-method"] ~= message.method
-    then
-        return self:_json_response(400, error_result(message.id, -32020, "HeaderMismatch"))
-    end
-
-    if requested_version ~= protocol_version then
-        return self:_json_response(
-            400,
-            error_result(message.id, -32022, "Unsupported protocol version", {
-                requested = requested_version,
-                supported = { protocol_version },
-            })
+    local modern = headers["mcp-protocol-version"] == protocol_version
+        or message.method == "server/discover"
+        or (
+            type(meta) == "table"
+            and (
+                meta["io.modelcontextprotocol/protocolVersion"] ~= nil
+                or meta["io.modelcontextprotocol/clientCapabilities"] ~= nil
+            )
         )
+    if modern then
+        if
+            not json_object(params)
+            or not json_object(meta)
+            or type(requested_version) ~= "string"
+            or not json_object(client_capabilities)
+        then
+            return self:_json_response(400, error_result(message.id, -32602, "Invalid params"))
+        end
+        if
+            headers["mcp-protocol-version"] == nil
+            or headers["mcp-method"] == nil
+            or headers["mcp-protocol-version"] ~= requested_version
+            or headers["mcp-method"] ~= message.method
+        then
+            return self:_json_response(400, error_result(message.id, -32020, "HeaderMismatch"))
+        end
+        if requested_version ~= protocol_version then
+            return self:_json_response(
+                400,
+                error_result(message.id, -32022, "Unsupported protocol version", {
+                    requested = requested_version,
+                    supported = supported_versions,
+                })
+            )
+        end
+    else
+        requested_version = headers["mcp-protocol-version"] or "2025-03-26"
+        if not supported_protocols[requested_version] then
+            return self:_json_response(
+                400,
+                error_result(message.id, -32022, "Unsupported protocol version", {
+                    requested = requested_version,
+                    supported = supported_versions,
+                })
+            )
+        end
+        if params ~= nil and not json_object(params) then
+            return self:_json_response(400, error_result(message.id, -32602, "Invalid params"))
+        end
+        params = params or {}
+        if message.method == "initialize" then
+            local info = params.clientInfo
+            if
+                message.id == nil
+                or type(params.protocolVersion) ~= "string"
+                or not json_object(params.capabilities)
+                or not json_object(info)
+                or type(info.name) ~= "string"
+                or type(info.version) ~= "string"
+            then
+                return self:_json_response(400, error_result(message.id, -32602, "Invalid params"))
+            end
+            local version = params.protocolVersion
+            if version == protocol_version or not supported_protocols[version] then
+                version = supported_versions[2]
+            end
+            return self:_json_response(200, {
+                jsonrpc = "2.0",
+                id = message.id,
+                result = {
+                    protocolVersion = version,
+                    capabilities = { tools = empty_object() },
+                    serverInfo = self.server_info,
+                },
+            })
+        end
     end
+    self.active_trace.protocol_version = requested_version
 
     if message.id == nil then
         return { status = 202, headers = {}, body = "" }
+    end
+    if not modern and message.method == "ping" then
+        return self:_json_response(
+            200,
+            { jsonrpc = "2.0", id = message.id, result = empty_object() }
+        )
     end
 
     if message.method == "server/discover" then
@@ -2072,7 +2299,7 @@ function GameMcpServer:_dispatch(request)
                 resultType = "complete",
                 ttlMs = 0,
                 cacheScope = "private",
-                supportedVersions = { protocol_version },
+                supportedVersions = supported_versions,
                 capabilities = { tools = empty_object() },
                 _meta = {
                     ["io.modelcontextprotocol/serverInfo"] = self.server_info,
@@ -2097,7 +2324,7 @@ function GameMcpServer:_dispatch(request)
     if message.method == "tools/call" then
         if
             type(params.name) ~= "string"
-            or (params.arguments ~= nil and type(params.arguments) ~= "table")
+            or (params.arguments ~= nil and not json_object(params.arguments))
             or not self.tool_catalog.get(params.name)
         then
             return self:_json_response(400, error_result(message.id, -32602, "Invalid params"))
@@ -2174,6 +2401,7 @@ function GameMcpServer:start()
         self:_abandon_resolution_capture(self.pending_action.resolution_context, "server_restart")
     end
     self.pending_action = nil
+    self.pending_batch = nil
     for _, channel in pairs(self.channels) do
         channel:clear()
     end
@@ -2233,6 +2461,14 @@ function GameMcpServer:poll()
     if not self.pending_action and self.active_trace and self.active_trace.finished then
         self.active_trace = nil
     end
+    if self.pending_batch and not self.pending_action then
+        local request_id = self.pending_batch.request.id
+        local response = self:_dispatch_next_batch()
+        if response then
+            response.id = request_id
+            self:_respond(response)
+        end
+    end
     while not self.pending_action do
         local request = self.channels.requests:pop()
         if not request then
@@ -2241,11 +2477,11 @@ function GameMcpServer:poll()
         self.active_trace = self:_new_request_trace(request)
         local response = self:_dispatch(request)
         if response then
-            if not self.active_trace.finished then
+            if self.active_trace and not self.active_trace.finished then
                 self:_finish_http_response_trace(response)
             end
             response.id = request.id
-            self.channels.responses:push(response)
+            self:_respond(response)
             self.active_trace = nil
         else
             assert(self.pending_action, "dispatch deferred without a pending action")
@@ -2272,6 +2508,7 @@ function GameMcpServer:stop()
         self:_abandon_resolution_capture(self.pending_action.resolution_context, "server_stop")
     end
     self.pending_action = nil
+    self.pending_batch = nil
     if self.thread then
         self.channels.control:push("stop")
         self.thread:wait()

@@ -172,6 +172,21 @@ local function rpc_body(id, method, params)
     )
 end
 
+---@return integer
+---@return table<string, string>
+---@return any
+local function legacy_rpc(server, port, id, method, params, version)
+    local body = JSON.encode({ jsonrpc = "2.0", id = id, method = method, params = params })
+    local request = make_request(port, body, {
+        headers = {
+            ["MCP-Protocol-Version"] = version or false,
+            ["Mcp-Method"] = false,
+        },
+    })
+    local status, headers, response_body = parse_http(send_http(server, port, request))
+    return status, headers, response_body ~= "" and JSON.decode(response_body) or nil
+end
+
 local function main_menu_observation()
     return {
         run_id = "menu",
@@ -952,6 +967,257 @@ function TestDiscovery:tearDown()
     self.server:stop()
 end
 
+function TestDiscovery:test_legacy_client_can_initialize_and_play_over_http()
+    local version = "2025-06-18"
+    local status, headers, payload = legacy_rpc(self.server, self.port, 1, "initialize", {
+        protocolVersion = version,
+        capabilities = {},
+        clientInfo = { name = "legacy-client", version = "1" },
+    })
+    luaunit.assertEquals(status, 200)
+    luaunit.assertNil(headers["mcp-session-id"])
+    luaunit.assertEquals(payload.result.protocolVersion, version)
+    luaunit.assertEquals(payload.result.capabilities, { tools = {} })
+    luaunit.assertEquals(payload.result.serverInfo.name, "balatro-mcp")
+
+    status, _, payload =
+        legacy_rpc(self.server, self.port, nil, "notifications/initialized", nil, version)
+    luaunit.assertEquals(status, 202)
+    luaunit.assertNil(payload)
+    status, _, payload = legacy_rpc(self.server, self.port, 2, "tools/list", nil, version)
+    luaunit.assertEquals(status, 200)
+    luaunit.assertNil(payload.result.resultType)
+    luaunit.assertNil(payload.result.ttlMs)
+    luaunit.assertNil(payload.result.cacheScope)
+    luaunit.assertEquals(payload.result.tools[1].name, "get_game_state")
+    luaunit.assertEquals(payload.result.tools[1].outputSchema.type, "object")
+
+    status, _, payload = legacy_rpc(self.server, self.port, 3, "tools/call", {
+        name = "get_game_state",
+    }, version)
+    luaunit.assertEquals(status, 200)
+    luaunit.assertFalse(payload.result.isError)
+    luaunit.assertNil(payload.result.resultType)
+    local state = payload.result.structuredContent.state
+    luaunit.assertEquals(state.phase, "blind_selection")
+    status, _, payload = legacy_rpc(self.server, self.port, 4, "tools/call", {
+        name = "select_blind",
+        arguments = { state_hash = state.state_hash, blind_id = state.blinds[1].id },
+    }, version)
+    luaunit.assertEquals(status, 200)
+    luaunit.assertFalse(payload.result.isError)
+    luaunit.assertEquals(payload.result.structuredContent.state.phase, "hand_play")
+    luaunit.assertEquals(
+        JSON.decode(payload.result.content[1].text),
+        payload.result.structuredContent
+    )
+end
+
+function TestDiscovery:test_legacy_projection_preserves_cross_era_state_hashes()
+    local status, _, initialized = legacy_rpc(self.server, self.port, 1, "initialize", {
+        protocolVersion = "2025-11-25",
+        capabilities = {},
+        clientInfo = { name = "newer-legacy-client", version = "1" },
+    })
+    luaunit.assertEquals(status, 200)
+    luaunit.assertEquals(initialized.result.protocolVersion, "2025-11-25")
+    local _, _, modern = call_tool(self.server, self.port, 2, "get_game_state")
+    status, _, initialized = legacy_rpc(self.server, self.port, 3, "tools/list")
+    luaunit.assertEquals(status, 200)
+    luaunit.assertNil(initialized.result.tools[1].outputSchema)
+    local tools = list_tools(self.server, self.port, 4)
+    luaunit.assertEquals(tools.get_game_state.outputSchema.type, "object")
+
+    local _, _, legacy = legacy_rpc(self.server, self.port, 5, "tools/call", {
+        name = "get_game_state",
+    })
+    luaunit.assertNil(legacy.result.structuredContent)
+    local state = JSON.decode(legacy.result.content[1].text).state
+    luaunit.assertEquals(state, modern.result.structuredContent.state)
+    local arguments = { state_hash = state.state_hash, blind_id = state.blinds[1].id }
+    status, _, legacy = legacy_rpc(self.server, self.port, 6, "tools/call", {
+        name = "select_blind",
+        arguments = arguments,
+    }, "2025-11-25")
+    luaunit.assertEquals(status, 200)
+    luaunit.assertFalse(legacy.result.isError)
+    luaunit.assertEquals(legacy.result.structuredContent.state.phase, "hand_play")
+    local _, _, stale = call_tool(self.server, self.port, 7, "select_blind", arguments)
+    luaunit.assertTrue(stale.result.isError)
+    luaunit.assertEquals(stale.result.structuredContent.code, "STALE_STATE")
+end
+
+function TestDiscovery:test_march_batch_waits_for_state_and_omits_notification_replies()
+    self.adapter.pending = { observations = 3, next_state = 2 }
+    local body = [[[{"jsonrpc":"2.0","method":"notifications/initialized"},{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_game_state"}},{"jsonrpc":"2.0","id":2,"method":"ping"}]]
+        .. "]"
+    local status, _, response_body =
+        parse_http(send_http(
+            self.server,
+            self.port,
+            make_request(self.port, body, {
+                headers = { ["MCP-Protocol-Version"] = false, ["Mcp-Method"] = false },
+            })
+        ))
+    local replies = JSON.decode(response_body)
+    luaunit.assertEquals(status, 200)
+    luaunit.assertEquals(#replies, 2)
+    luaunit.assertEquals(replies[1].id, 1)
+    luaunit.assertNil(replies[1].result.structuredContent)
+    luaunit.assertEquals(JSON.decode(replies[1].result.content[1].text).state.phase, "hand_play")
+    luaunit.assertEquals(replies[2], { jsonrpc = "2.0", id = 2, result = {} })
+    local _, _, modern = call_tool(self.server, self.port, 3, "get_game_state")
+    luaunit.assertEquals(modern.result.resultType, "complete")
+    luaunit.assertEquals(modern.result.structuredContent.state.phase, "hand_play")
+end
+
+function TestDiscovery:test_malformed_modern_metadata_cannot_downgrade_to_legacy()
+    local body =
+        [[{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":false,"io.modelcontextprotocol/clientCapabilities":false}}}]]
+    local status, _, response_body =
+        parse_http(send_http(
+            self.server,
+            self.port,
+            make_request(self.port, body, {
+                headers = { ["MCP-Protocol-Version"] = false, ["Mcp-Method"] = false },
+            })
+        ))
+    luaunit.assertEquals(status, 400)
+    luaunit.assertEquals(JSON.decode(response_body).error.code, -32602)
+end
+
+function TestDiscovery:test_null_modern_metadata_cannot_downgrade_to_legacy()
+    local body =
+        [[{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":null,"io.modelcontextprotocol/clientCapabilities":null}}}]]
+    local status, _, response_body =
+        parse_http(send_http(
+            self.server,
+            self.port,
+            make_request(self.port, body, {
+                headers = { ["MCP-Protocol-Version"] = false, ["Mcp-Method"] = false },
+            })
+        ))
+    luaunit.assertEquals(status, 400)
+    luaunit.assertEquals(JSON.decode(response_body).error.code, -32602)
+end
+
+function TestDiscovery:test_march_batch_preserves_null_neighbors()
+    local body = [=[[null,{"jsonrpc":"2.0","id":1,"method":"ping"},null]]=]
+    local status, _, response_body =
+        parse_http(send_http(
+            self.server,
+            self.port,
+            make_request(self.port, body, {
+                headers = { ["MCP-Protocol-Version"] = false, ["Mcp-Method"] = false },
+            })
+        ))
+    local replies = JSON.decode(response_body)
+    luaunit.assertEquals(status, 200)
+    luaunit.assertEquals(#replies, 3)
+    luaunit.assertEquals(replies[1].error.code, -32600)
+    luaunit.assertEquals(replies[2], { jsonrpc = "2.0", id = 1, result = {} })
+    luaunit.assertEquals(replies[3].error.code, -32600)
+end
+
+function TestDiscovery:test_null_decoder_preserves_strings_and_escaped_marker_keys()
+    local body =
+        [[{"jsonrpc":"2.0","id":"quoted-\"null\\null","method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{"\u005f\u005fbalatro_mcp_null_7b1021":true},"clientInfo":{"name":"literal null","version":"1"},"extra":null}}]]
+    local status, _, response_body =
+        parse_http(send_http(
+            self.server,
+            self.port,
+            make_request(self.port, body, {
+                headers = { ["MCP-Protocol-Version"] = false, ["Mcp-Method"] = false },
+            })
+        ))
+    local payload = JSON.decode(response_body)
+    luaunit.assertEquals(status, 200)
+    luaunit.assertEquals(payload.id, 'quoted-"null\\null')
+    luaunit.assertEquals(payload.result.protocolVersion, "2025-03-26")
+end
+
+function TestDiscovery:test_null_decoder_keeps_numbered_marker_objects()
+    local body =
+        [[{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{"__balatro_mcp_null_7b1021":true,"__balatro_mcp_null_7b10211":true},"clientInfo":{"name":"legacy-client","version":"1"},"extra":null}}]]
+    local status, _, response_body =
+        parse_http(send_http(
+            self.server,
+            self.port,
+            make_request(self.port, body, {
+                headers = { ["MCP-Protocol-Version"] = false, ["Mcp-Method"] = false },
+            })
+        ))
+    luaunit.assertEquals(status, 200)
+    luaunit.assertEquals(JSON.decode(response_body).result.protocolVersion, "2025-03-26")
+end
+
+function TestDiscovery:test_legacy_initialization_negotiates_and_validates_required_fields()
+    local status, _, payload = legacy_rpc(self.server, self.port, 1, "initialize", {
+        protocolVersion = "unknown-version",
+        capabilities = {},
+        clientInfo = { name = "legacy-client", version = "1" },
+    })
+    luaunit.assertEquals(status, 200)
+    luaunit.assertEquals(payload.result.protocolVersion, "2025-11-25")
+    for _, invalid in ipairs({
+        { protocolVersion = false },
+        { capabilities = "not-an-object" },
+        { clientInfo = { name = "missing-version" } },
+    }) do
+        ---@type table<string, any>
+        local params = {
+            protocolVersion = "2025-03-26",
+            capabilities = {},
+            clientInfo = { name = "legacy-client", version = "1" },
+        }
+        for name, value in pairs(invalid) do
+            params[name] = value
+        end
+        status, _, payload = legacy_rpc(self.server, self.port, 2, "initialize", params)
+        luaunit.assertEquals(status, 400)
+        luaunit.assertEquals(payload.error.code, -32602)
+    end
+    status, _, payload = legacy_rpc(self.server, self.port, 3, "ping", nil, "unsupported-version")
+    luaunit.assertEquals(status, 400)
+    luaunit.assertEquals(payload.error.code, -32022)
+end
+
+function TestDiscovery:test_march_batch_rejects_initialization_before_mutating_game()
+    local _, _, observed = call_tool(self.server, self.port, 1, "get_game_state")
+    local state = observed.result.structuredContent.state
+    local body = JSON.encode({
+        {
+            jsonrpc = "2.0",
+            id = 2,
+            method = "tools/call",
+            params = {
+                name = "select_blind",
+                arguments = { state_hash = state.state_hash, blind_id = state.blinds[1].id },
+            },
+        },
+        {
+            jsonrpc = "2.0",
+            id = 3,
+            method = "initialize",
+            params = {
+                protocolVersion = "2025-03-26",
+                capabilities = {},
+                clientInfo = { name = "legacy-client", version = "1" },
+            },
+        },
+    })
+    local status = parse_http(send_http(
+        self.server,
+        self.port,
+        make_request(self.port, body, {
+            headers = { ["MCP-Protocol-Version"] = false, ["Mcp-Method"] = false },
+        })
+    ))
+    luaunit.assertEquals(status, 400)
+    local _, _, after = call_tool(self.server, self.port, 4, "get_game_state")
+    luaunit.assertEquals(after.result.structuredContent.state, state)
+end
+
 function TestDiscovery:test_client_can_discover_server_over_http()
     local request = make_request(self.port, valid_discovery_body)
     local status, headers, response_body = parse_http(send_http(self.server, self.port, request))
@@ -965,7 +1231,12 @@ function TestDiscovery:test_client_can_discover_server_over_http()
     luaunit.assertEquals(payload.result.resultType, "complete")
     luaunit.assertEquals(payload.result.ttlMs, 0)
     luaunit.assertEquals(payload.result.cacheScope, "private")
-    luaunit.assertEquals(payload.result.supportedVersions, { "2026-07-28" })
+    luaunit.assertEquals(payload.result.supportedVersions, {
+        "2026-07-28",
+        "2025-11-25",
+        "2025-06-18",
+        "2025-03-26",
+    })
     luaunit.assertEquals(payload.result.capabilities, { tools = {} })
     luaunit.assertEquals(payload.result._meta["io.modelcontextprotocol/serverInfo"], {
         name = "balatro-mcp",
@@ -6795,7 +7066,12 @@ function TestDiscovery:test_unsupported_protocol_version_lists_supported_version
     luaunit.assertEquals(payload.id, 301)
     luaunit.assertEquals(payload.error.code, -32022)
     luaunit.assertEquals(payload.error.data.requested, "v999.0.0")
-    luaunit.assertEquals(payload.error.data.supported, { "2026-07-28" })
+    luaunit.assertEquals(payload.error.data.supported, {
+        "2026-07-28",
+        "2025-11-25",
+        "2025-06-18",
+        "2025-03-26",
+    })
 end
 
 function TestDiscovery:test_header_and_body_metadata_must_match()

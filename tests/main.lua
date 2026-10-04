@@ -1,5 +1,3 @@
-arg = { [0] = "balatro-mcp-tests" }
-
 package.path = table.concat({
     "./?.lua",
     "./?/init.lua",
@@ -37,8 +35,12 @@ if os.getenv("BALATRO_MCP_TEST_SERVER_PORT") then
                     steamodded_version = "1.0.0~BETA-2014b",
                     lovely_version = "0.9.0",
                     compatibility = { status = "supported" },
-                    active_mods = { "balatro-mcp" },
+                    active_mods = {
+                        { id = "balatro-mcp", name = "Balatro MCP", version = "0.1.0" },
+                    },
                     legal_actions = {},
+                    available_decks = {},
+                    available_stakes = {},
                 },
             },
         },
@@ -73,12 +75,12 @@ if os.getenv("BALATRO_MCP_TEST_SERVER_PORT") then
         server:stop()
     end
 else
-    local luaunit = require("luaunit")
-    require("game_mcp_server_test")
-    require("mod_entry_test")
-
-    function love.load()
-        local failures = luaunit.LuaUnit.run()
+    function love.load(arguments)
+        arg = { [0] = "balatro-mcp-tests" }
+        local luaunit = require("luaunit")
+        require("game_mcp_server_test")
+        require("mod_entry_test")
+        local failures = luaunit.LuaUnit.run(unpack(arguments))
         love.event.quit(failures == 0 and 0 or 1)
     end
 end
