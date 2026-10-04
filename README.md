@@ -9,6 +9,8 @@ A Balatro mod that exposes game state and semantic actions to local AI clients t
 3. Copy `balatro-game-rules/` to your AI agent's skills directory.
 4. Start Balatro and connect your MCP client using **Streamable HTTP** to `http://127.0.0.1:18790/mcp`.
 
+Supported MCP versions: `2026-07-28`, `2025-11-25`, `2025-06-18`, and `2025-03-26`.
+
 ## Features
 
 - Read filtered Balatro game state.
@@ -16,11 +18,6 @@ A Balatro mod that exposes game state and semantic actions to local AI clients t
 - Switch between fair and omniscient debugging modes.
 - Includes an English Balatro Game Rules Skill.
 - Listens only on the local loopback interface.
-
-## MCP compatibility
-
-- Supports MCP `2026-07-28`, `2025-11-25`, `2025-06-18`, and `2025-03-26` on the same endpoint.
-- Uses stateless Streamable HTTP without Session IDs or the deprecated HTTP+SSE transport.
 
 ## Development
 
