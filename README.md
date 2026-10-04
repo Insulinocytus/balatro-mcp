@@ -21,7 +21,6 @@ A Balatro mod that exposes game state and semantic actions to local AI clients t
 
 - Supports MCP `2026-07-28`, `2025-11-25`, `2025-06-18`, and `2025-03-26` on the same endpoint.
 - Uses stateless Streamable HTTP without Session IDs or the deprecated HTTP+SSE transport.
-- `/mcp` accepts POST requests; browser GET requests return `405`.
 
 ## Development
 
