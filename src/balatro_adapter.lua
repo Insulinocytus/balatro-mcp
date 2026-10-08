@@ -73,7 +73,7 @@ end
 local minimum_versions = {
     balatro = "1.0.1o-FULL",
     love = "11.5",
-    steamodded = "1.0.0~BETA-2014b",
+    steamodded = "1.0.0~BETA-1224a",
     lovely = "0.7.1",
 }
 
@@ -110,6 +110,20 @@ local function version_at_least(actual, minimum)
         return found.beta > required.beta
     end
     return found.rev >= required.rev
+end
+
+-- Steamodded 1.0.0~BETA-1224a lacks SMODS.stake_is_unlocked; use the rule its own stake selector
+-- applies so legality matches what the player can pick in that version.
+local function stake_is_unlocked(stake_key, deck_key)
+    if SMODS.stake_is_unlocked then
+        return SMODS.stake_is_unlocked(stake_key, deck_key)
+    end
+    local profile = G.PROFILES[G.SETTINGS.profile]
+    return profile.all_unlocked
+        or SMODS.check_applied_stakes(
+            G.P_STAKES[stake_key],
+            profile.deck_usage[deck_key] or { wins_by_key = {} }
+        )
 end
 
 local function love_version_string()
@@ -391,7 +405,7 @@ function ProductionBalatroAdapter:_available_stakes(decks)
         if stake.key and not stake.mod then
             local deck_keys = {}
             for _, deck in ipairs(decks) do
-                if SMODS.stake_is_unlocked(stake.key, deck.key) then
+                if stake_is_unlocked(stake.key, deck.key) then
                     deck_keys[#deck_keys + 1] = deck.key
                 end
             end
@@ -2272,7 +2286,7 @@ function ProductionBalatroAdapter:_encyclopedia_include(proto, set, key, visibil
                 and deck.key
                 and deck.unlocked ~= false
                 and deck.discovered
-                and SMODS.stake_is_unlocked(key, deck.key)
+                and stake_is_unlocked(key, deck.key)
             then
                 return true
             end
@@ -2346,7 +2360,7 @@ function ProductionBalatroAdapter:_execute_start_run(arguments)
     if not stake or stake.mod then
         return nil, adapter_error("INVALID_PARAMS", "stake is not a standard stake level")
     end
-    if not SMODS.stake_is_unlocked(stake.key, deck.key) then
+    if not stake_is_unlocked(stake.key, deck.key) then
         return nil, adapter_error("ACTION_NOT_ALLOWED", "The stake is locked for this deck")
     end
     if not valid_seed(arguments.seed) then
@@ -2366,11 +2380,21 @@ function ProductionBalatroAdapter:_execute_start_run(arguments)
         end
     end
 
-    local ok, call_error = pcall(G.FUNCS.start_run, nil, {
-        deck_choice = { name = deck.name },
-        stake_choice = stake.order,
-        seed = arguments.seed,
-    })
+    local ok, call_error = pcall(function()
+        -- Steamodded 1.0.0~BETA-1224a ignores deck_choice and stake_choice: vanilla
+        -- Game:start_run reads G.GAME.viewed_back and args.stake instead.
+        if G.GAME.viewed_back then
+            G.GAME.viewed_back:change_to(deck)
+        else
+            G.GAME.viewed_back = rawget(_G, "Back")(deck)
+        end
+        G.FUNCS.start_run(nil, {
+            deck_choice = { name = deck.name },
+            stake_choice = stake.order,
+            stake = stake.order,
+            seed = arguments.seed,
+        })
+    end)
     if not ok then
         return nil, adapter_error("INTERNAL_ERROR", "Could not start run: " .. tostring(call_error))
     end

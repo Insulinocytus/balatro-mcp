@@ -100,8 +100,8 @@ if G and G.VERSION and not version_at_least(G.VERSION, "1.0.1o-FULL") then
         G.VERSION
     )
 end
-if SMODS.version and not version_at_least(SMODS.version, "1.0.0~BETA-2014b") then
-    compatibility_issues[#compatibility_issues + 1] = ("Steamodded %s is below 1.0.0~BETA-2014b"):format(
+if SMODS.version and not version_at_least(SMODS.version, "1.0.0~BETA-1224a") then
+    compatibility_issues[#compatibility_issues + 1] = ("Steamodded %s is below 1.0.0~BETA-1224a"):format(
         SMODS.version
     )
 end
@@ -127,8 +127,9 @@ elseif not port or port % 1 ~= 0 or port < 1 or port > 65535 then
     set_startup_error("Configured port must be an integer from 1 to 65535")
 else
     local path_separator = mod.path:match("[/\\]$") and "" or "/"
-    local worker_source, read_error =
-        SMODS.NFS.read(mod.path .. path_separator .. "src/http_worker.lua")
+    -- Steamodded 1.0.0~BETA-1224a exposes nativefs only as the global NFS.
+    local nfs = SMODS.NFS or rawget(_G, "NFS")
+    local worker_source, read_error = nfs.read(mod.path .. path_separator .. "src/http_worker.lua")
     if not worker_source then
         set_startup_error("Could not load HTTP worker: " .. tostring(read_error))
     else

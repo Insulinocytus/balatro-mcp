@@ -10,6 +10,9 @@ A Balatro mod that exposes game state and semantic actions to local AI clients t
 4. Start Balatro and connect your MCP client using **Streamable HTTP** to `http://127.0.0.1:18790/mcp`.
 
 Supported MCP versions: `2026-07-28`, `2025-11-25`, `2025-06-18`, and `2025-03-26`.
+
+Supported Steamodded versions: `1.0.0~BETA-1224a` (the Nexus Mods release) or newer. [SMODS 26.1002.0](https://github.com/Steamodded/smods/releases/tag/26.1002.0) or newer is recommended: older Steamodded releases have their own vanilla-behavior bugs, such as seeded runs picking different Boss Blinds across game launches ([smods#1529](https://github.com/Steamodded/smods/issues/1529)).
+
 ## Features
 
 - Read filtered Balatro game state.

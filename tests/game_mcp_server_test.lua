@@ -8261,7 +8261,14 @@ function TestProductionAdapter:test_start_run_preserves_normal_new_run_bookkeepi
             CONTROLLER = { locks = {}, lock_input = false },
             SETTINGS = { current_setup = "New Run", profile = 1 },
             MAIN_MENU_UI = {},
-            GAME = {},
+            GAME = {
+                viewed_back = {
+                    effect = { center = red_deck },
+                    change_to = function(back, center)
+                        back.effect.center = center
+                    end,
+                },
+            },
             SAVED_GAME = { GAME = { won = false } },
             PROFILES = {
                 [1] = {
@@ -8299,11 +8306,138 @@ function TestProductionAdapter:test_start_run_preserves_normal_new_run_bookkeepi
         luaunit.assertEquals(save_count, 1)
         luaunit.assertEquals(started_with.deck_choice.name, "Red Deck")
         luaunit.assertEquals(started_with.stake_choice, 1)
+        luaunit.assertEquals(started_with.stake, 1)
+        luaunit.assertIs(G.GAME.viewed_back.effect.center, red_deck)
         luaunit.assertNil(started_with.seed)
     end, debug.traceback)
 
     rawset(_G, "G", saved_g)
     rawset(_G, "SMODS", saved_smods)
+    if not ok then
+        error(test_error)
+    end
+end
+
+function TestProductionAdapter:test_steamodded_1224a_uses_its_stake_rule_and_vanilla_start_inputs()
+    local saved_g = rawget(_G, "G")
+    local saved_smods = rawget(_G, "SMODS")
+    local saved_back = rawget(_G, "Back")
+    local started_with
+    local red_deck = {
+        key = "b_red",
+        name = "Red Deck",
+        set = "Back",
+        config = { discards = 1 },
+        unlocked = true,
+        discovered = true,
+    }
+    local blue_deck = {
+        key = "b_blue",
+        name = "Blue Deck",
+        set = "Back",
+        config = { hands = 1 },
+        unlocked = true,
+        discovered = true,
+    }
+    local white_stake =
+        { key = "stake_white", name = "White Stake", order = 1, applied_stakes = {} }
+    local red_stake = {
+        key = "stake_red",
+        name = "Red Stake",
+        order = 2,
+        applied_stakes = { "stake_white" },
+    }
+
+    local ok, test_error = xpcall(function()
+        -- 1224a has no SMODS.NFS, SMODS.stake_is_unlocked or SMODS.RunSelect.
+        _G.SMODS = {
+            version = "1.0.0~BETA-1224a",
+            mod_list = {},
+            stake_from_index = function()
+                return "stake_white"
+            end,
+            check_applied_stakes = function(stake, deck_usage)
+                for _, applied in ipairs(stake.applied_stakes) do
+                    if not deck_usage.wins_by_key[applied] then
+                        return false
+                    end
+                end
+                return true
+            end,
+        }
+        _G.Back = function(center)
+            return { name = center.name, effect = { center = center } }
+        end
+        _G.G = {
+            VERSION = "1.0.1o-FULL",
+            STAGES = { MAIN_MENU = 1, RUN = 2 },
+            STATES = { MENU = 11 },
+            STAGE = 1,
+            STATE = 11,
+            STATE_COMPLETE = true,
+            CONTROLLER = { locks = {}, lock_input = false },
+            SETTINGS = { current_setup = "New Run", profile = 1, paused = false },
+            MAIN_MENU_UI = {},
+            GAME = {},
+            PROFILES = {
+                [1] = {
+                    high_scores = { current_streak = { amt = 0 } },
+                    deck_usage = { b_red = { wins_by_key = { stake_white = 1 } } },
+                },
+            },
+            P_CENTER_POOLS = { Back = { red_deck, blue_deck }, Stake = { white_stake, red_stake } },
+            P_CENTERS = { b_red = red_deck, b_blue = blue_deck },
+            P_STAKES = { stake_white = white_stake, stake_red = red_stake },
+            P_BLINDS = {},
+            P_TAGS = {},
+            FUNCS = {
+                start_run = function(_, arguments)
+                    started_with = arguments
+                end,
+            },
+            save_settings = function() end,
+        }
+
+        local adapter = ProductionBalatroAdapter.new()
+        local menu, menu_error = adapter:observe("fair")
+        luaunit.assertNil(menu_error)
+        ---@cast menu table
+        luaunit.assertEquals(menu.public_state.compatibility.versions, "supported")
+        local deck_keys = {}
+        for _, stake in ipairs(menu.public_state.available_stakes) do
+            deck_keys[stake.key] = stake.deck_keys
+        end
+        luaunit.assertEquals(deck_keys, {
+            stake_white = { "b_blue", "b_red" },
+            stake_red = { "b_red" },
+        })
+
+        local locked, locked_error = adapter:execute({
+            name = "start_run",
+            expected_state_hash = "sha256:test",
+            arguments = { deck_key = "b_blue", stake = 2 },
+            targets = {},
+        })
+        luaunit.assertNil(locked)
+        ---@cast locked_error table
+        luaunit.assertEquals(locked_error.code, "ACTION_NOT_ALLOWED")
+        luaunit.assertNil(started_with)
+
+        local started, start_error = adapter:execute({
+            name = "start_run",
+            expected_state_hash = "sha256:test",
+            arguments = { deck_key = "b_red", stake = 2 },
+            targets = {},
+        })
+        luaunit.assertNil(start_error)
+        luaunit.assertNotNil(started)
+        luaunit.assertIs(G.GAME.viewed_back.effect.center, red_deck)
+        luaunit.assertEquals(started_with.stake, 2)
+    end, debug.traceback)
+
+    rawset(_G, "G", saved_g)
+    rawset(_G, "SMODS", saved_smods)
+    rawset(_G, "Back", saved_back)
     if not ok then
         error(test_error)
     end
@@ -10634,7 +10768,7 @@ function TestProductionAdapter:test_runtime_hardening_versions_races_and_overlay
             CONTROLLER = { locks = {}, lock_input = false },
             SETTINGS = { current_setup = "New Run", profile = 1, paused = false },
             MAIN_MENU_UI = {},
-            GAME = {},
+            GAME = { viewed_back = { effect = { center = red_deck }, change_to = function() end } },
             P_CENTER_POOLS = { Back = { red_deck }, Stake = { white_stake } },
             P_CENTERS = { b_red = red_deck },
             P_STAKES = { stake_white = white_stake },
@@ -15390,7 +15524,8 @@ function TestProductionAdapter:test_back_application_separates_run_setup_and_kee
         local function capture(key)
             G.STAGE = G.STAGES.MAIN_MENU
             G.STATE = G.STATES.MENU
-            G.GAME = {}
+            G.GAME =
+                { viewed_back = { effect = { center = back_pool[1] }, change_to = function() end } }
             queued = {}
             local adapter = ProductionBalatroAdapter.new()
             local result, action_error = adapter:execute({

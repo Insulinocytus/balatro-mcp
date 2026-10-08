@@ -7,6 +7,7 @@ local globals_to_restore = {
     "sendErrorMessage",
     "sendInfoMessage",
     "sendDebugMessage",
+    "NFS",
 }
 
 TestModEntry = {}
@@ -182,6 +183,18 @@ function TestModEntry:test_entry_assembles_server_and_preserves_game_update_chai
     luaunit.assertEquals(tab.nodes[1].nodes[1].config.text, "Port: 18790")
     luaunit.assertEquals(tab.nodes[2].nodes[1].config.text, "Status: listening")
     luaunit.assertEquals(self.mod.debug_info.Status, "listening")
+end
+
+function TestModEntry:test_steamodded_1224a_loads_worker_through_global_nfs()
+    _G.NFS = SMODS.NFS
+    SMODS.NFS = nil
+    SMODS.version = "1.0.0~BETA-1224a"
+
+    assert(loadfile("main.lua"))()
+
+    luaunit.assertEquals(self.worker_path, "./src/http_worker.lua")
+    luaunit.assertEquals(self.server_status.state, "listening")
+    luaunit.assertEquals(self.mod.debug_info.Compatibility, "supported")
 end
 
 function TestModEntry:test_lovely_logger_failure_does_not_break_game_update()
