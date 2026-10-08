@@ -1,7 +1,7 @@
 ---
 name: balatro-game-rules
 description: Vanilla Balatro rules for run flow, poker-hand recognition, scoring semantics, drawing and discarding, Blind resolution, Shop behavior, and economy defaults.
-version: 1.1.0
+version: 1.1.1
 ---
 
 # Balatro Game Rules
