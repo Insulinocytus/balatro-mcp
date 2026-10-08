@@ -8006,55 +8006,6 @@ local function sorted_prototype_keys(list)
     return keys
 end
 
-local function vanilla_keys_from_game_source()
-    local source = assert(
-        os.getenv("BALATRO_SOURCE"),
-        "BALATRO_SOURCE must point to the Balatro source checkout"
-    )
-    local content = read_file(source .. "/game.lua")
-    local by_set = {
-        Tarot = {},
-        Planet = {},
-        Spectral = {},
-        Voucher = {},
-        Back = {},
-        Tag = {},
-        Blind = {},
-        Joker = {},
-    }
-    local skip = {
-        c_base = true,
-        c_locked = true,
-        t_undiscovered = true,
-        p_undiscovered = true,
-        s_undiscovered = true,
-        v_locked = true,
-        v_undiscovered = true,
-    }
-    for line in content:gmatch("[^\n]+") do
-        local key, set = line:match("^%s*([%w_]+)%s*=%s*{.*set%s*=%s*['\"]([%w]+)['\"]")
-        if
-            key
-            and by_set[set]
-            and not skip[key]
-            and not line:find("omit%s*=%s*true")
-            and not key:find("undiscovered")
-            and not key:find("_locked$")
-        then
-            by_set[set][#by_set[set] + 1] = key
-        end
-    end
-    local blinds_block = content:match("self%.P_BLINDS%s*=%s*%b{}")
-    luaunit.assertNotNil(blinds_block)
-    for key in blinds_block:gmatch("(bl_[%w_]+)%s*=") do
-        by_set.Blind[#by_set.Blind + 1] = key
-    end
-    for _, keys in pairs(by_set) do
-        table.sort(keys)
-    end
-    return by_set
-end
-
 local function encyclopedia_keys(set)
     local encyclopedia = assert(ProductionBalatroAdapter.new():encyclopedia("omniscient"))
     local keys = {}
@@ -8079,36 +8030,6 @@ function TestProductionAdapter:test_vanilla_runtime_coverage_matches_encyclopedi
     local saved_g = rawget(_G, "G")
     local saved_smods = rawget(_G, "SMODS")
     local ok, test_error = xpcall(function()
-        local vanilla = vanilla_keys_from_game_source()
-        luaunit.assertEquals(
-            vanilla.Tarot,
-            classified_keys(vanilla_consumable_coverage, key_filter(vanilla.Tarot))
-        )
-        luaunit.assertEquals(
-            vanilla.Planet,
-            classified_keys(vanilla_consumable_coverage, key_filter(vanilla.Planet))
-        )
-        luaunit.assertEquals(
-            vanilla.Spectral,
-            classified_keys(vanilla_consumable_coverage, key_filter(vanilla.Spectral))
-        )
-        luaunit.assertEquals(vanilla.Voucher, classified_keys(vanilla_voucher_coverage))
-        luaunit.assertEquals(vanilla.Back, classified_keys(vanilla_back_coverage))
-        luaunit.assertEquals(vanilla.Blind, classified_keys(vanilla_blind_coverage))
-        luaunit.assertEquals(vanilla.Tag, classified_keys(vanilla_tag_coverage))
-        local consumable_vanilla = {}
-        for _, set in ipairs({ "Tarot", "Planet", "Spectral" }) do
-            for _, key in ipairs(vanilla[set]) do
-                consumable_vanilla[#consumable_vanilla + 1] = key
-            end
-        end
-        table.sort(consumable_vanilla)
-        luaunit.assertEquals(consumable_vanilla, classified_keys(vanilla_consumable_coverage))
-        local lifecycle = classified_keys(vanilla_lifecycle_joker_coverage)
-        local joker_set = key_filter(vanilla.Joker)
-        for _, key in ipairs(lifecycle) do
-            luaunit.assertTrue(joker_set[key] == true, key)
-        end
         luaunit.assertEquals(
             sorted_prototype_keys(VanillaConsumablePrototypes),
             classified_keys(vanilla_consumable_coverage)

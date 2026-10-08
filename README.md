@@ -20,7 +20,7 @@ Supported MCP versions: `2026-07-28`, `2025-11-25`, `2025-06-18`, and `2025-03-2
 
 ## Development
 
-- Set `BALATRO_SOURCE`, then run `mise run check`.
+- Run `mise run check`.
 - Run `mise run package` to create `dist/balatro-mcp-<version>.zip`.
 
 ## License
