@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-`main.lua` is the Steamodded entry point; `config.lua` and `balatro-mcp.json` define runtime defaults and mod metadata. Core code lives in `src/`: `game_mcp_server.lua` handles MCP requests, `http_worker.lua` owns loopback HTTP I/O, `balatro_adapter.lua` translates Balatro state and actions, and `tool_catalog.lua` defines the public tool contract. Tests and fixtures are under `tests/`, including vendored LuaUnit. Architectural decisions belong in `docs/adr/`; domain terminology is defined in `CONTEXT.md`. The published agent skill lives at `skills/balatro-game-rules/SKILL.md`.
+`main.lua` is the Steamodded entry point; `config.lua` and `balatro-mcp.json` define runtime defaults and mod metadata. Core code lives in `src/`: `game_mcp_server.lua` handles MCP requests, `http_worker.lua` owns loopback HTTP I/O, `balatro_adapter.lua` translates Balatro state and actions, and `tool_catalog.lua` defines the public tool contract. Tests and fixtures are under `tests/`, including vendored LuaUnit. Architectural decisions belong in `docs/adr/`; domain terminology is defined in `GLOSSARY.md`. The published agent skill lives at `skills/balatro-game-rules/SKILL.md`.
 
 ## Build, Test, and Development Commands
 
@@ -26,3 +26,17 @@ Recent history favors short Conventional Commit subjects such as `feat: capture 
 ## Security & Configuration
 
 Keep the server bound to loopback. Preserve host, origin, content-type, size, and timeout validation in `http_worker.lua`. Do not commit local paths, generated `dist/` archives, or conformance results.
+
+## Agent skills
+
+### Issue tracker
+
+Track issues and specs in GitHub Issues. Before ticket work, read `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the five default triage labels. Before triage or label changes, read `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Use a single-context layout. Before codebase exploration or domain work, read `docs/agents/domain.md`.
