@@ -2,12 +2,12 @@
 
 ## Project Structure & Module Organization
 
-`main.lua` is the Steamodded entry point; `config.lua` and `balatro-mcp.json` define runtime defaults and mod metadata. Core code lives in `src/`: `game_mcp_server.lua` handles MCP requests, `http_worker.lua` owns loopback HTTP I/O, `balatro_adapter.lua` translates Balatro state and actions, and `tool_catalog.lua` defines the public tool contract. Tests and fixtures are under `tests/`, including vendored LuaUnit. Architectural decisions belong in `docs/adr/`; domain terminology is defined in `GLOSSARY.md`. The published agent skill lives at `skills/balatro-game-rules/SKILL.md`.
+`main.lua` is the Steamodded entry point; `config.lua` and `balatro-mcp.json` define runtime defaults and mod metadata. Core code lives in `src/`: `game_mcp_server.lua` handles MCP requests, `http_worker.lua` owns loopback HTTP I/O, `balatro_adapter.lua` translates Balatro state and actions, and `tool_catalog.lua` defines the public tool contract. `src/json.lua` is vendored rxi/json.lua (ADR 0014); keep it byte-identical to upstream, which is why `.styluaignore` excludes it. Tests and fixtures are under `tests/`, including vendored LuaUnit. Architectural decisions belong in `docs/adr/`; domain terminology is defined in `GLOSSARY.md`. The published agent skill lives at `skills/balatro-game-rules/SKILL.md`.
 
 ## Build, Test, and Development Commands
 
 - `mise install` installs the pinned LÖVE, StyLua, Lua language server, Node, and MCP conformance tools.
-- `mise run check` runs formatting checks, static diagnostics, LÖVE/LuaUnit tests, and MCP `2026-07-28` conformance. Set `STEAMODDED_SOURCE` to a Steamodded source checkout first.
+- `mise run check` runs formatting checks, static diagnostics, LÖVE/LuaUnit tests, and MCP `2026-07-28` conformance.
 - `mise run package` creates `dist/balatro-mcp-<version>.zip` and verifies its runtime-only layout.
 - `mise exec -- stylua .` formats Lua files before the full check.
 

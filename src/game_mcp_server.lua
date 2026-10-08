@@ -150,7 +150,7 @@ local function decode_request(json, body)
     if not body:find("null", 1, true) then
         return json.decode(body)
     end
-    -- Steamodded drops null values; replace only unquoted literals before decoding.
+    -- The vendored rxi json.lua drops null values; replace only unquoted literals before decoding.
     local parts, occupied_strings = {}, {}
     local cursor, start = 1, 1
     while cursor <= #body do

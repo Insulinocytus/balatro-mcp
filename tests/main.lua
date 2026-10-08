@@ -6,11 +6,7 @@ package.path = table.concat({
     package.path,
 }, ";")
 
-local steamodded_source = assert(
-    os.getenv("STEAMODDED_SOURCE"),
-    "STEAMODDED_SOURCE must point to the Steamodded source checkout"
-)
-JSON = assert(loadfile(steamodded_source .. "/libs/json/json.lua"))()
+local JSON = require("src.json")
 
 local FakeBalatroAdapter = require("fake_balatro_adapter")
 local ToolCatalog = require("src.tool_catalog")

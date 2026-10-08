@@ -35,6 +35,7 @@ function TestModEntry:setUp()
     self.module_paths = {}
     self.fake_adapter = {}
     self.fake_tool_catalog = {}
+    self.fake_json = {}
     self.logged_error = nil
     self.logged_info = nil
     self.logged_debug = nil
@@ -87,6 +88,9 @@ function TestModEntry:setUp()
                 end
                 if path == "src/tool_catalog.lua" then
                     return test.fake_tool_catalog
+                end
+                if path == "src/json.lua" then
+                    return test.fake_json
                 end
                 return {
                     new = function(options)
@@ -158,11 +162,13 @@ function TestModEntry:test_entry_assembles_server_and_preserves_game_update_chai
         "src/game_mcp_server.lua",
         "src/balatro_adapter.lua",
         "src/tool_catalog.lua",
+        "src/json.lua",
     })
     luaunit.assertEquals(self.server_options.port, 18790)
     luaunit.assertEquals(self.server_options.visibility, "fair")
     luaunit.assertIs(self.server_options.adapter, self.fake_adapter)
     luaunit.assertIs(self.server_options.tool_catalog, self.fake_tool_catalog)
+    luaunit.assertIs(self.server_options.json, self.fake_json)
     luaunit.assertTrue(self.server_options.log_enabled("error"))
     luaunit.assertTrue(self.server_options.log_enabled("info"))
     luaunit.assertFalse(self.server_options.log_enabled("debug"))

@@ -136,6 +136,7 @@ else
             local Server = assert(SMODS.load_file("src/game_mcp_server.lua"))()
             local Adapter = assert(SMODS.load_file("src/balatro_adapter.lua"))()
             local ToolCatalog = assert(SMODS.load_file("src/tool_catalog.lua"))()
+            local JSON = assert(SMODS.load_file("src/json.lua"))()
             return Server.new({
                 json = JSON,
                 port = port,

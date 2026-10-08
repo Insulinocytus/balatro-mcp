@@ -54,6 +54,7 @@ required=(
     balatro-mcp/src/http_worker.lua
     balatro-mcp/src/balatro_adapter.lua
     balatro-mcp/src/tool_catalog.lua
+    balatro-mcp/src/json.lua
     balatro-game-rules/SKILL.md
 )
 listing="$(git archive --format=tar "$tree" | tar -t | tr -d '\r')"
