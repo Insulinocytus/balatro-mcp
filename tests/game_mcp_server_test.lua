@@ -7320,34 +7320,23 @@ function TestDiscovery:test_encyclopedia_visibility_filters_fixture_entries()
     local default_entries = default_payload.result.structuredContent.effect_encyclopedia.entries
     local fair = fair_payload.result.structuredContent.effect_encyclopedia
     local omniscient = omniscient_payload.result.structuredContent.effect_encyclopedia
-    local by_key = {}
-    for _, entry in ipairs(fair.entries) do
-        by_key[entry.key] = entry
-    end
     local omniscient_keys = {}
     for _, entry in ipairs(omniscient.entries) do
         omniscient_keys[entry.key] = entry
     end
 
+    luaunit.assertFalse(fair_payload.result.isError)
     luaunit.assertEquals(default_entries, fair.entries)
     luaunit.assertEquals(fair.visibility, "fair")
-    luaunit.assertEquals(by_key.j_joker, {
-        key = "j_joker",
-        set = "Joker",
-        name = "Joker",
-        description = "+4 Mult",
-    })
-    luaunit.assertEquals(by_key.j_blueprint, { key = "j_blueprint", set = "Joker" })
-    luaunit.assertNil(by_key.j_blueprint.name)
-    luaunit.assertNil(by_key.j_blueprint.description)
-    luaunit.assertNil(by_key.j_caino)
-    luaunit.assertNil(by_key.c_soul)
+    luaunit.assertEquals(fair.entries[2], { set = "Joker", status = "undiscovered" })
+    luaunit.assertEquals(
+        fair.entries[3],
+        { set = "Joker", status = "locked", unlock_condition = "?????" }
+    )
+    luaunit.assertFalse(omniscient_payload.result.isError)
     luaunit.assertEquals(omniscient.visibility, "omniscient")
-    luaunit.assertEquals(omniscient_keys.j_blueprint.name, "Blueprint")
-    luaunit.assertEquals(omniscient_keys.j_caino.name, "Caino")
-    luaunit.assertNotNil(omniscient_keys.j_caino.description)
-    luaunit.assertEquals(omniscient_keys.c_soul.name, "The Soul")
-    luaunit.assertNotNil(omniscient_keys.c_soul.description)
+    luaunit.assertEquals(omniscient_keys.j_caino.status, "locked")
+    luaunit.assertEquals(omniscient_keys.j_caino.unlock_condition, "?????")
     luaunit.assertTrue(hashed.result.isError)
     luaunit.assertEquals(hashed.result.structuredContent.code, "INVALID_PARAMS")
 end
@@ -11017,14 +11006,15 @@ function TestProductionAdapter:test_encyclopedia_filters_and_interpolates_protot
         order = 4.5,
         config = { extra = 2 },
     }
-    local locked = {
-        key = "j_locked",
+    local acrobat = {
+        key = "j_acrobat",
         set = "Joker",
-        name = "Locked Joker",
+        name = "Acrobat",
         unlocked = false,
         discovered = false,
         order = 5,
-        config = { mult = 8 },
+        config = { extra = 3 },
+        unlock_condition = { type = "c_hands_played", extra = 200 },
     }
     local caino = {
         key = "j_caino",
@@ -11032,10 +11022,10 @@ function TestProductionAdapter:test_encyclopedia_filters_and_interpolates_protot
         name = "Caino",
         unlocked = false,
         discovered = false,
-        hidden = true,
         rarity = 4,
         order = 6,
         config = { extra = 1 },
+        unlock_condition = { type = "", extra = "", hidden = true },
     }
     local modded = {
         key = "j_mod",
@@ -11091,6 +11081,27 @@ function TestProductionAdapter:test_encyclopedia_filters_and_interpolates_protot
         discovered = false,
         order = 2,
         config = { hands = 1 },
+        unlock_condition = { type = "discover_amount", amount = 20 },
+    }
+    local magic_deck = {
+        key = "b_magic",
+        set = "Back",
+        name = "Magic Deck",
+        unlocked = false,
+        discovered = false,
+        order = 3,
+        config = {},
+        unlock_condition = { type = "win_deck", deck = "b_blue" },
+    }
+    local zodiac_deck = {
+        key = "b_zodiac",
+        set = "Back",
+        name = "Zodiac Deck",
+        unlocked = false,
+        discovered = false,
+        order = 4,
+        config = {},
+        unlock_condition = { type = "win_stake", stake = 2 },
     }
     local white_stake = { key = "stake_white", set = "Stake", name = "White Stake", order = 1 }
     local gold_stake = { key = "stake_gold", set = "Stake", name = "Gold Stake", order = 8 }
@@ -11190,6 +11201,8 @@ function TestProductionAdapter:test_encyclopedia_filters_and_interpolates_protot
         }
         _G.G = {
             VERSION = "1.0.1o-FULL",
+            SETTINGS = { profile = 1 },
+            PROFILES = { { career_stats = { c_hands_played = 57 } } },
             GAME = {
                 dollars = 99,
                 probabilities = { normal = 4 },
@@ -11210,14 +11223,14 @@ function TestProductionAdapter:test_encyclopedia_filters_and_interpolates_protot
                     steel,
                     blue,
                     hallucination,
-                    locked,
+                    acrobat,
                     caino,
                     modded,
                     omitted,
                     demo,
                     wip,
                 },
-                Back = { red_deck, locked_deck },
+                Back = { red_deck, locked_deck, magic_deck, zodiac_deck },
                 Stake = { white_stake, gold_stake },
                 Voucher = { voucher },
                 Tarot = { tarot },
@@ -11230,6 +11243,7 @@ function TestProductionAdapter:test_encyclopedia_filters_and_interpolates_protot
                 Tag = { tag },
             },
             P_BLINDS = { bl_small = small_blind },
+            P_CENTERS = { b_red = red_deck, b_blue = locked_deck },
             P_TAGS = { tag_investment = tag },
             P_SEALS = { Red = seal },
         }
@@ -11279,10 +11293,15 @@ function TestProductionAdapter:test_encyclopedia_filters_and_interpolates_protot
                             "#1# in #2# chance to create a Tarot card when any Booster Pack is opened",
                         },
                     },
-                    j_locked = { name = "Locked Joker", text = { "+#1# Mult" } },
+                    j_acrobat = {
+                        name = "Acrobat",
+                        text = { "X#1# Mult on final hand of round" },
+                        unlock = { "Play {C:attention,E:1}#1#{} hands", "{C:inactive}(#2#)" },
+                    },
                     j_caino = {
                         name = "Caino",
                         text = { "This Joker gains X#1# Mult when a face card is destroyed" },
+                        unlock = { "{E:1,s:1.3}?????" },
                     },
                 },
                 Back = {
@@ -11320,6 +11339,19 @@ function TestProductionAdapter:test_encyclopedia_filters_and_interpolates_protot
                 },
                 Other = {
                     red_seal = { name = "Red Seal", text = { "Retrigger this card 1 time" } },
+                    deck_locked_win = {
+                        text = { "Win a run with", "{C:attention}#1#{}", "on any difficulty" },
+                    },
+                    deck_locked_stake = {
+                        text = { "Win a run with any", "deck on at least", "{V:1}#1#{} difficulty" },
+                    },
+                    deck_locked_discover = {
+                        text = {
+                            "Discover at least",
+                            "{C:attention}#1#{} items from",
+                            "your collection",
+                        },
+                    },
                     p_arcana_normal = {
                         name = "Arcana Pack",
                         text = { "Choose #1# of up to #2# Tarot cards" },
@@ -11340,6 +11372,7 @@ function TestProductionAdapter:test_encyclopedia_filters_and_interpolates_protot
             },
             misc = {
                 poker_hands = { Flush = "Flush" },
+                dictionary = { k_unknown = "?????" },
             },
         }
 
@@ -11353,12 +11386,20 @@ function TestProductionAdapter:test_encyclopedia_filters_and_interpolates_protot
         local function by_key(entries)
             local found = {}
             for _, entry in ipairs(entries) do
-                found[entry.key] = entry
+                if entry.key then
+                    found[entry.key] = entry
+                end
             end
             return found
         end
         local fair_by_key = by_key(fair.entries)
         local omniscient_by_key = by_key(omniscient.entries)
+        local fair_keyless = {}
+        for _, entry in ipairs(fair.entries) do
+            if not entry.key then
+                fair_keyless[#fair_keyless + 1] = entry
+            end
+        end
         local sets = {}
         for _, entry in ipairs(omniscient.entries) do
             sets[entry.set] = true
@@ -11370,10 +11411,31 @@ function TestProductionAdapter:test_encyclopedia_filters_and_interpolates_protot
         luaunit.assertEquals(fair_by_key.j_joker, {
             key = "j_joker",
             set = "Joker",
+            status = "discovered",
             name = "Joker",
             description = "+4 Mult",
         })
-        luaunit.assertEquals(fair_by_key.j_blueprint, { key = "j_blueprint", set = "Joker" })
+        luaunit.assertEquals(fair_keyless, {
+            { set = "Joker", status = "undiscovered" },
+            { set = "Joker", status = "locked", unlock_condition = "Play 200 hands (57)" },
+            { set = "Joker", status = "locked", unlock_condition = "?????" },
+            {
+                set = "Back",
+                status = "locked",
+                unlock_condition = "Discover at least 20 items from your collection",
+            },
+            {
+                set = "Back",
+                status = "locked",
+                unlock_condition = "Win a run with ????? on any difficulty",
+            },
+            {
+                set = "Back",
+                status = "locked",
+                unlock_condition = "Win a run with any deck on at least Gold Stake difficulty",
+            },
+            { set = "Spectral", status = "undiscovered" },
+        })
         luaunit.assertEquals(
             fair_by_key.j_green_joker.description,
             "+1 Mult per hand played -1 Mult per discard (Currently +0 Mult)"
@@ -11402,14 +11464,13 @@ function TestProductionAdapter:test_encyclopedia_filters_and_interpolates_protot
             fair_by_key.j_hallucination.description,
             "1 in 2 chance to create a Tarot card when any Booster Pack is opened"
         )
-        luaunit.assertNil(fair_by_key.j_locked)
-        luaunit.assertNil(fair_by_key.j_caino)
-        luaunit.assertNil(fair_by_key.c_soul)
+        luaunit.assertNil(fair_by_key.j_blueprint)
+        luaunit.assertNil(fair_by_key.j_acrobat)
         luaunit.assertNil(fair_by_key.j_mod)
         luaunit.assertNil(fair_by_key.j_omit)
         luaunit.assertNil(fair_by_key.j_demo)
         luaunit.assertNil(fair_by_key.j_wip)
-        luaunit.assertNil(fair_by_key.b_blue)
+        luaunit.assertEquals(fair_by_key.stake_white.status, "discovered")
         luaunit.assertEquals(fair_by_key.stake_white.name, "White Stake")
         luaunit.assertNil(fair_by_key.stake_gold)
         luaunit.assertEquals(
@@ -11441,8 +11502,15 @@ function TestProductionAdapter:test_encyclopedia_filters_and_interpolates_protot
 
         luaunit.assertEquals(omniscient.visibility, "omniscient")
         luaunit.assertEquals(omniscient_by_key.j_blueprint.name, "Blueprint")
-        luaunit.assertEquals(omniscient_by_key.j_locked.name, "Locked Joker")
-        luaunit.assertEquals(omniscient_by_key.j_locked.description, "+8 Mult")
+        luaunit.assertEquals(omniscient_by_key.j_blueprint.status, "undiscovered")
+        luaunit.assertEquals(omniscient_by_key.j_acrobat, {
+            key = "j_acrobat",
+            set = "Joker",
+            status = "locked",
+            name = "Acrobat",
+            description = "X3 Mult on final hand of round",
+            unlock_condition = "Play 200 hands (57)",
+        })
         luaunit.assertEquals(omniscient_by_key.j_caino.name, "Caino")
         luaunit.assertEquals(
             omniscient_by_key.j_caino.description,

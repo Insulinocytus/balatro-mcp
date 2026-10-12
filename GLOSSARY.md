@@ -65,8 +65,20 @@ _避免使用_：部分状态
 _避免使用_：公平模式、全知模式
 
 **Effect Encyclopedia（效果百科）**：
-由独立只读 tool 返回的卡牌与物品原型名称及基础效果对照，不附带在 Semantic Action 响应中。AI Agent 在上下文缺少当前可见性模式的百科时应至少查询一次，模式切换后重新查询；Game MCP Server 不追踪或强制该上下文要求。
+由独立只读 tool 返回的卡牌与物品原型对照：每个原型的收集状态，已发现原型的名称与基础效果，以及 Locked Content 的 Unlock Condition。它不附带在 Semantic Action 响应中。AI Agent 在上下文缺少当前可见性模式的百科时应至少查询一次，模式切换后重新查询；Game MCP Server 不追踪或强制该上下文要求。
 _避免使用_：图鉴、收藏柜、对象池、静态表
+
+**Locked Content（未解锁内容）**：
+当前档案尚未解锁的原版 Joker、牌组或 Voucher。它不会进入商店或牌组选择，必须先满足其 Unlock Condition；解锁与发现是两个独立状态。
+_避免使用_：未发现内容、隐藏内容、未拥有
+
+**Unlock Condition（解锁条件）**：
+游戏界面为某项 Locked Content 显示的解锁提示，可能附带档案当前进度，也可能被游戏刻意隐藏而不透露条件。它描述玩家可见的提示，而不是解锁判定的内部规则。
+_避免使用_：成就、解锁规则实现
+
+**Undiscovered Content（未发现内容）**：
+已解锁、但当前档案尚未在非种子、非挑战对局中获得、使用、开启或击败过的原型；收藏界面只显示占位，不显示名称与效果。
+_避免使用_：未解锁内容、Locked Content
 
 **Game Rules Skill（游戏规则 Skill）**：
 与 Mod 同版本发布的可移植英文静态规则资料，供 AI Agent 加载原版 Balatro 的牌型、计分、Ante/Blind/商店循环与利息。它不是 Game MCP Server 的 tool、Effect Encyclopedia、State Snapshot 或策略指南。
