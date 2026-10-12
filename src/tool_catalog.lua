@@ -28,6 +28,7 @@ local encyclopedia_set_values = {
     "Tag",
     "Blind",
 }
+local encyclopedia_status_values = { "locked", "undiscovered", "discovered" }
 local reorder_area_values = { "hand", "jokers" }
 local stake_values = { 1, 2, 3, 4, 5, 6, 7, 8 }
 local resolution_phase_values = {
@@ -621,10 +622,12 @@ local shared_defs = {
         properties = {
             key = string_type,
             set = ref("encyclopedia_set"),
+            status = enum_schema(encyclopedia_status_values),
             name = string_type,
             description = string_type,
+            unlock_condition = string_type,
         },
-        required = { "key", "set" },
+        required = { "set", "status" },
         additionalProperties = false,
     },
     effect_encyclopedia = {
@@ -1138,7 +1141,9 @@ local encyclopedia_description = table.concat({
         .. visibility_csv
         .. "; encyclopedia entry set is "
         .. set_csv
-        .. ". Fair Mode omits undiscovered identity fields and hidden legendary or secret prototypes.",
+        .. "; entry status is "
+        .. table.concat(encyclopedia_status_values, ", ")
+        .. ". Locked entries include unlock_condition: the in-game unlock hint, with live profile progress where the game shows it, or ????? where the game hides it. In Fair Mode, locked and undiscovered entries omit key, name, and description.",
     "",
     'Success structuredContent: { "effect_encyclopedia": { "visibility": "'
         .. table.concat(visibility_values, '"|"')
@@ -1272,7 +1277,7 @@ local start_run_description = action_description(
         .. ").",
     "stake is "
         .. stake_csv
-        .. "; seed uses uppercase A-Z and digits 1-9, length 1-8. deck_key is a dynamic finite set from the current Legal Action Descriptor.",
+        .. "; seed uses uppercase A-Z and digits 1-9, length 1-8. deck_key is a dynamic finite set from the current Legal Action Descriptor. Omit seed unless the user explicitly asks for one: seeded runs never unlock or discover content and do not record wins.",
     { not_allowed = "the selected stake is locked for this deck" }
 )
 
@@ -1527,7 +1532,7 @@ local tools = {
             },
             seed = {
                 type = "string",
-                description = "Optional fixed seed using one to eight uppercase letters or digits 1-9.",
+                description = "Optional fixed seed using one to eight uppercase letters or digits 1-9. Omit unless the user explicitly asks; seeded runs never unlock or discover content.",
                 minLength = 1,
                 maxLength = 8,
                 pattern = "^[A-Z1-9]+$",

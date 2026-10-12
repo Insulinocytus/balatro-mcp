@@ -12,6 +12,7 @@
     "G",
     "Game",
     "SMODS",
+    "number_format",
     "sendDebugMessage",
     "sendErrorMessage",
     "sendInfoMessage",

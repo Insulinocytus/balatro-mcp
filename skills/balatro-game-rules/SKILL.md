@@ -1,7 +1,6 @@
 ---
 name: balatro-game-rules
-description: Vanilla Balatro rules for run flow, poker-hand recognition, scoring semantics, drawing and discarding, Blind resolution, Shop behavior, and economy defaults.
-version: 1.1.1
+description: Vanilla Balatro rules for runs, scoring, shops, and unlocks.
 ---
 
 # Balatro Game Rules
@@ -464,6 +463,22 @@ $5 → $6 → $7 → $8 ...
 The reroll cost normally resets to $5 upon entering a new Shop.
 
 Effects can modify reroll costs or Shop contents.
+
+## Unlocks and discovery
+
+Profile progress has two separate states:
+
+- **Locked** Jokers, Decks, and Vouchers never appear in Shops and cannot be selected until their unlock condition is met. The Effect Encyclopedia lists each locked item with its in-game unlock hint.
+- **Undiscovered** items are unlocked, but the profile has not learned them yet. Obtain one once to discover it: buy or use a Joker or consumable, redeem a Voucher, open a Booster Pack, find an Edition, receive a Tag, or defeat a Blind. Seeing an item in the Shop does not discover it.
+
+Rules that affect unlock progress:
+
+- Seeded runs and Challenge runs never unlock or discover anything, never advance career totals, and do not record wins.
+- Unlocks based on career totals, such as playing a number of hands across all runs, are checked when the game returns to the main menu, not during a run.
+- Legendary Jokers show `?????` as their unlock hint. A Legendary Joker unlocks when The Soul Spectral card creates it.
+- Stakes unlock per Deck. White Stake is always available. Winning a run with a Deck at its highest available Stake makes the next Stake available for that Deck. A win at a higher Stake also counts as a win at every lower Stake on that Deck.
+- A run is won by defeating the Ante 8 Boss Blind.
+- Challenge mode is not available through the Game MCP Server.
 
 ## Decision principles implied by the rules
 

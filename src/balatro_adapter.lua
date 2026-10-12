@@ -186,22 +186,26 @@ function ProductionBalatroAdapter.new()
     }, ProductionBalatroAdapter)
 end
 
-function ProductionBalatroAdapter:_english_entry(set, key, vars, fallback_name)
-    local descriptions = self.english and self.english.descriptions
-    local entry = descriptions and descriptions[set] and descriptions[set][key]
-    local name = entry and entry.name or fallback_name or key
-    local lines = {}
-    for _, line in ipairs(entry and entry.text or {}) do
+local function render_lines(lines, vars)
+    local rendered = {}
+    for _, line in ipairs(lines or {}) do
         line = line:gsub("#(%d+)#", function(index)
             local value = vars and vars[tonumber(index)]
             return value == nil and ("#" .. index .. "#") or tostring(value)
         end)
         line = compact_text(line)
         if line ~= "" then
-            lines[#lines + 1] = line
+            rendered[#rendered + 1] = line
         end
     end
-    return tostring(name), table.concat(lines, " ")
+    return table.concat(rendered, " ")
+end
+
+function ProductionBalatroAdapter:_english_entry(set, key, vars, fallback_name)
+    local descriptions = self.english and self.english.descriptions
+    local entry = descriptions and descriptions[set] and descriptions[set][key]
+    local name = entry and entry.name or fallback_name or key
+    return tostring(name), render_lines(entry and entry.text, vars)
 end
 
 function ProductionBalatroAdapter:_deck_vars(center)
@@ -1909,13 +1913,124 @@ local function vanilla_proto(proto)
     return proto and not proto.mod and not proto.omit and not proto.demo and not proto.wip
 end
 
-local function hidden_proto(proto)
-    return proto.hidden or proto.rarity == 4
-end
+-- Mirrors the Locked branch of vanilla generate_card_ui; these show live profile progress.
+local unlock_progress_stats = {
+    ["Mr. Bones"] = "c_losses",
+    Acrobat = "c_hands_played",
+    ["Sock and Buskin"] = "c_face_cards_played",
+    Swashbuckler = "c_jokers_sold",
+    ["Burnt Joker"] = "c_cards_sold",
+    ["Overstock Plus"] = "c_shop_dollars_spent",
+    ["Tarot Tycoon"] = "c_tarots_bought",
+    ["Planet Tycoon"] = "c_planets_bought",
+    ["Reroll Glut"] = "c_shop_rerolls",
+    ["Omen Globe"] = "c_tarot_reading_used",
+    Observatory = "c_planetarium_used",
+    ["Nacho Tong"] = "c_cards_played",
+    Recyclomancy = "c_cards_discarded",
+    ["Money Tree"] = "c_round_interest_cap_streak",
+    Illusion = "c_playing_cards_bought",
+}
+
+local unlock_var_kinds = {
+    Troubadour = "extra",
+    Satellite = "extra",
+    Liquidation = "extra",
+    ["Glow Up"] = "extra",
+    Petroglyph = "extra",
+    Retcon = "extra",
+    Palette = "extra",
+    ["Smeared Joker"] = "enhancement",
+    ["Glass Joker"] = "enhancement",
+    ["Rough Gem"] = "suit",
+    Bloodstone = "suit",
+    Arrowhead = "suit",
+    ["Onyx Agate"] = "suit",
+    ["Hanging Chad"] = "hand",
+    ["The Duo"] = "hand",
+    ["The Trio"] = "hand",
+    ["The Family"] = "hand",
+    ["The Order"] = "hand",
+    ["The Tribe"] = "hand",
+    ["Driver's License"] = "count",
+    Bootstraps = "count",
+    ["Oops! All 6s"] = "chips",
+    ["The Idol"] = "chips",
+    Stuntman = "chips",
+    ["Seeing Double"] = "seeing_double",
+    Antimatter = "blank_redeems",
+    Showman = "ante",
+    ["Flower Pot"] = "ante",
+    ["Wee Joker"] = "n_rounds",
+    ["Merry Andy"] = "n_rounds",
+    Cartomancer = "tarot_count",
+}
+
+local lockable_sets = { Joker = true, Back = true, Voucher = true }
 
 function ProductionBalatroAdapter:_loc_misc(group, key)
     local misc = self.english and self.english.misc
     return misc and misc[group] and misc[group][key] or key
+end
+
+function ProductionBalatroAdapter:_unlock_vars(proto)
+    local condition = proto.unlock_condition or {}
+    local extra = condition.extra
+    local profile = G.PROFILES and G.SETTINGS and G.PROFILES[G.SETTINGS.profile] or {}
+    local stat = unlock_progress_stats[proto.name]
+    if stat then
+        return { extra, (profile.career_stats or {})[stat] }
+    end
+    local kind = unlock_var_kinds[proto.name]
+    if kind == "extra" then
+        return { extra }
+    elseif kind == "enhancement" then
+        return { extra.count, (self:_english_entry("Enhanced", extra.e_key)) }
+    elseif kind == "suit" then
+        return { extra.count, self:_loc_misc("suits_singular", extra.suit) }
+    elseif kind == "hand" then
+        return { self:_loc_misc("poker_hands", extra) }
+    elseif kind == "count" then
+        return { extra.count }
+    elseif kind == "chips" then
+        return { number_format and number_format(condition.chips) or condition.chips }
+    elseif kind == "seeing_double" then
+        return { self:_loc_misc("dictionary", "ph_4_7_of_clubs") }
+    elseif kind == "blank_redeems" then
+        local blank = profile.voucher_usage and profile.voucher_usage.v_blank
+        return { extra, blank and blank.count or 0 }
+    elseif kind then
+        -- Remaining kinds (ante, n_rounds, tarot_count) name the unlock_condition field itself.
+        return { condition[kind] }
+    end
+    return {}
+end
+
+-- Mirrors vanilla Back:generate_UI for locked decks.
+function ProductionBalatroAdapter:_deck_unlock_vars(proto)
+    local condition = proto.unlock_condition or {}
+    if condition.type == "win_deck" then
+        local deck = G.P_CENTERS[condition.deck]
+        local name = deck and deck.unlocked and (self:_english_entry("Back", condition.deck))
+        return "deck_locked_win", { name or self:_loc_misc("dictionary", "k_unknown") }
+    elseif condition.type == "discover_amount" then
+        return "deck_locked_discover", { condition.amount }
+    elseif condition.type == "win_stake" then
+        local stake = G.P_CENTER_POOLS.Stake[condition.stake]
+        return "deck_locked_stake", { (self:_english_entry("Stake", stake.key)) }
+    end
+    return "demo_locked", {}
+end
+
+function ProductionBalatroAdapter:_unlock_condition(proto, set)
+    local descriptions = self.english and self.english.descriptions or {}
+    if set == "Back" then
+        local key, vars = self:_deck_unlock_vars(proto)
+        local entry = descriptions.Other and descriptions.Other[key]
+        return render_lines(entry and entry.text, vars)
+    end
+    local entry = descriptions[set] and descriptions[set][proto.key]
+    return render_lines(entry and entry.unlock, self:_unlock_vars(proto))
 end
 
 function ProductionBalatroAdapter:_encyclopedia_tag_vars(proto)
@@ -2273,37 +2388,42 @@ function ProductionBalatroAdapter:_encyclopedia_include(proto, set, key, visibil
     if not vanilla_proto(proto) or not key then
         return false
     end
-    if visibility == "omniscient" then
+    if visibility == "omniscient" or set ~= "Stake" then
         return true
     end
-    if hidden_proto(proto) then
-        return false
-    end
-    if set == "Stake" then
-        for _, deck in ipairs(G.P_CENTER_POOLS.Back or {}) do
-            if
-                vanilla_proto(deck)
-                and deck.key
-                and deck.unlocked ~= false
-                and deck.discovered
-                and stake_is_unlocked(key, deck.key)
-            then
-                return true
-            end
+    for _, deck in ipairs(G.P_CENTER_POOLS.Back or {}) do
+        if
+            vanilla_proto(deck)
+            and deck.key
+            and deck.unlocked ~= false
+            and deck.discovered
+            and stake_is_unlocked(key, deck.key)
+        then
+            return true
         end
-        return false
     end
-    return proto.unlocked ~= false
+    return false
 end
 
 function ProductionBalatroAdapter:_encyclopedia_entry(proto, set, key, visibility)
     if set == "Seal" and not tostring(key):match("_seal$") then
         key = string.lower(key) .. "_seal"
     end
-    local entry = { key = key, set = set }
-    if visibility ~= "omniscient" and proto.discovered == false then
+    local status = "discovered"
+    if lockable_sets[set] and proto.unlocked == false then
+        status = "locked"
+    elseif proto.discovered == false then
+        status = "undiscovered"
+    end
+    local entry = { set = set, status = status }
+    if status == "locked" then
+        entry.unlock_condition = self:_unlock_condition(proto, set)
+    end
+    -- Fair Mode hides identity of locked and undiscovered prototypes, key included.
+    if visibility ~= "omniscient" and status ~= "discovered" then
         return entry
     end
+    entry.key = key
     local loc_set = (set == "Seal" or set == "Booster") and "Other" or set
     local loc_key = key
     if set == "Booster" then
