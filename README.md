@@ -22,6 +22,10 @@ A Balatro mod that exposes game state and semantic actions to local AI clients t
 - Bundled English Balatro Game Rules Skill.
 - Loopback-only server.
 
+## Roadmap
+
+- Challenge mode support.
+
 ## Development
 
 - `mise run check`: run all checks.
