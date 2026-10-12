@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.2.0 (unreleased)
+## 1.2.0
 
 ### Breaking
 
@@ -19,13 +19,13 @@
 - `start_run` tells agents to omit `seed` unless the user asks for one, because seeded runs never unlock or discover content.
 - The Game Rules Skill no longer has its own version. It ships in the same release ZIP as the mod.
 
-## 1.1.1 - 2026-10-08
+## 1.1.1
 
 ### Changed
 
 - Supports Steamodded `1.0.0~BETA-1224a` or newer.
 
-## 1.1.0 - 2026-10-04
+## 1.1.0
 
 ### Added
 
@@ -36,6 +36,6 @@
 - Game actions, visibility rules, and state hashes are the same for every protocol version. There are no Session IDs and no deprecated HTTP+SSE transport.
 - Delayed responses and 2025-03-26 batch requests are preserved, including null values and invalid batch entries.
 
-## 1.0.0 - 2026-09-05
+## 1.0.0
 
 - Initial release.
